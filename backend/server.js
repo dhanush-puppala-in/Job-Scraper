@@ -1,3 +1,9 @@
+const { File } = require('node:buffer');
+
+if (typeof globalThis.File === 'undefined') {
+  globalThis.File = File;
+}
+
 require('dotenv').config();
 
 const express = require('express');
@@ -17,10 +23,28 @@ app.use(cors());
 
 app.use(express.json());
 
-app.use(express.urlencoded({
-  extended: true
-}));
+app.use(
+  express.urlencoded({
+    extended: true
+  })
+);
 
+// Main API response — shown when opening the Railway domain
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'ACDYON Job Scraper API',
+    message: 'Backend is running successfully',
+    endpoints: {
+      health: '/api/health',
+      scraperHealth: '/api/scraper/health',
+      jobs: '/api/jobs',
+      scraperStats: '/api/scraper/stats'
+    }
+  });
+});
+
+// General application health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'API is running',
@@ -35,11 +59,9 @@ app.use('/api/jobs', jobRoutes);
 
 app.use('/api/scraper', scraperRoutes);
 
-
+// Error handler
 app.use((err, req, res, next) => {
-  logger.error(
-    `Unhandled error: ${err.message}`
-  );
+  logger.error(`Unhandled error: ${err.message}`);
 
   res.status(500).json({
     error: 'Internal server error',
@@ -50,7 +72,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-
+// Keep this last: handles unknown routes
 app.use((req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -58,13 +80,9 @@ app.use((req, res) => {
   });
 });
 
-
 const start = async () => {
   try {
-    logger.info(
-      'Starting Job Scraper backend...'
-    );
-
+    logger.info('Starting Job Scraper backend...');
 
     if (!MongoDB) {
       throw new Error(
@@ -78,25 +96,15 @@ const start = async () => {
       );
     }
 
-
     await MongoDB.connect();
 
-    logger.info(
-      'Database connected successfully'
-    );
-
+    logger.info('Database connected successfully');
 
     app.listen(PORT, () => {
-      logger.info(
-        `Server running on http://localhost:${PORT}`
-      );
+      logger.info(`Server running on port ${PORT}`);
     });
-
   } catch (error) {
-    logger.error(
-      `Failed to start server: ${error.message}`
-    );
-
+    logger.error(`Failed to start server: ${error.message}`);
     process.exit(1);
   }
 };
