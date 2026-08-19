@@ -17,8 +17,12 @@ function Scraper() {
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
 
-  const API_URL =
-    process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  // IMPORTANT:
+  // REACT_APP_API_URL is injected when Netlify builds the frontend.
+  const API_URL = (
+    process.env.REACT_APP_API_URL ||
+    'http://localhost:5000'
+  ).replace(/\/$/, '');
 
   const sources = [
     {
@@ -36,7 +40,6 @@ function Scraper() {
     }
   ];
 
-  // Add log entry
   const addLog = (message, type = 'info') => {
     setLogs((prev) => [
       {
@@ -49,7 +52,29 @@ function Scraper() {
     ].slice(0, 50));
   };
 
-  // Poll scrape status
+  /**
+   * Read backend response safely.
+   * This is useful when Railway returns JSON, plain text,
+   * or an HTML error page.
+   */
+  const readResponse = async (response) => {
+    const contentType =
+      response.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      return await response.json();
+    }
+
+    const text = await response.text();
+
+    return {
+      message: text || `HTTP ${response.status}`
+    };
+  };
+
+  /**
+   * Poll scraper status
+   */
   const pollScrapeStatus = async (scrapeId) => {
     const maxAttempts = 120;
     let attempts = 0;
@@ -60,11 +85,15 @@ function Scraper() {
           `${API_URL}/api/scraper/status/${scrapeId}`
         );
 
-        if (!response.ok) {
-          throw new Error('Failed to fetch scrape status');
-        }
+        const data = await readResponse(response);
 
-        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            data?.message ||
+            data?.error ||
+            `Status request failed with HTTP ${response.status}`
+          );
+        }
 
         setActiveScrapes((prev) => {
           const exists = prev.some(
@@ -93,12 +122,15 @@ function Scraper() {
         }
 
         if (data.status === 'failed') {
+          const backendError =
+            data.error || 'Scrape failed on the backend';
+
           addLog(
-            `Scrape failed: ${data.error || 'Unknown error'}`,
+            `Scrape failed: ${backendError}`,
             'error'
           );
 
-          setError(data.error || 'Scrape failed');
+          setError(backendError);
           setIsRunning(false);
           return;
         }
@@ -112,7 +144,10 @@ function Scraper() {
             'error'
           );
 
-          setError('Scrape timed out.');
+          setError(
+            'Scrape timed out while waiting for the backend.'
+          );
+
           setIsRunning(false);
         }
       } catch (err) {
@@ -123,11 +158,14 @@ function Scraper() {
           setTimeout(poll, 1000);
         } else {
           addLog(
-            'Unable to retrieve scrape status.',
+            `Unable to retrieve scrape status: ${err.message}`,
             'error'
           );
 
-          setError('Unable to retrieve scrape status.');
+          setError(
+            `Unable to retrieve scrape status: ${err.message}`
+          );
+
           setIsRunning(false);
         }
       }
@@ -136,7 +174,9 @@ function Scraper() {
     poll();
   };
 
-  // Start scrape
+  /**
+   * Start scrape
+   */
   const startScrape = async () => {
     try {
       setError(null);
@@ -147,12 +187,18 @@ function Scraper() {
         'info'
       );
 
+      addLog(
+        `Backend: ${API_URL}`,
+        'info'
+      );
+
       const response = await fetch(
         `${API_URL}/api/scraper/start`,
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            Accept: 'application/json'
           },
           body: JSON.stringify({
             source: scrapeSource
@@ -160,35 +206,48 @@ function Scraper() {
         }
       );
 
+      const data = await readResponse(response);
+
+      console.log('Start scrape response:', {
+        status: response.status,
+        data
+      });
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
+        const backendMessage =
+          data?.message ||
+          data?.error ||
+          `Backend returned HTTP ${response.status}`;
 
         throw new Error(
-          errorData?.message || 'Failed to start scrape'
+          `${backendMessage} (HTTP ${response.status})`
         );
       }
 
-      const data = await response.json();
-
       if (!data.scrapeId) {
         throw new Error(
-          'Backend did not return a scrape ID'
+          'Backend responded successfully but did not return a scrape ID.'
         );
       }
 
       addLog(
-        `Scrape started with ID: ${data.scrapeId}`,
+        `Scrape started successfully. ID: ${data.scrapeId}`,
         'success'
       );
 
       pollScrapeStatus(data.scrapeId);
+
     } catch (err) {
       console.error('Start scrape error:', err);
 
-      setError(err.message);
+      const message =
+        err?.message ||
+        'Unable to connect to the backend.';
+
+      setError(message);
 
       addLog(
-        `Error: ${err.message}`,
+        `Error: ${message}`,
         'error'
       );
 
@@ -196,7 +255,6 @@ function Scraper() {
     }
   };
 
-  // Clear logs
   const clearLogs = () => {
     setLogs([]);
   };
@@ -236,7 +294,6 @@ function Scraper() {
         >
           <h2>Scrape Configuration</h2>
 
-          {/* Data Source */}
           <div className="control-section">
             <label>Data Source</label>
 
@@ -244,10 +301,11 @@ function Scraper() {
               {sources.map((source) => (
                 <motion.label
                   key={source.id}
-                  className={`source-option ${scrapeSource === source.id
+                  className={`source-option ${
+                    scrapeSource === source.id
                       ? 'selected'
                       : ''
-                    }`}
+                  }`}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                 >
@@ -290,8 +348,9 @@ function Scraper() {
 
             <motion.button
               type="button"
-              className={`btn-primary ${isRunning ? 'running' : ''
-                }`}
+              className={`btn-primary ${
+                isRunning ? 'running' : ''
+              }`}
               onClick={startScrape}
               disabled={isRunning}
               whileHover={
