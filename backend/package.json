@@ -32,12 +32,13 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "user-agents": "^1.0.1",
     "uuid": "^9.0.0",
+    "undici": "^5.x",
     "winston": "^3.11.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=16.0.0"
+     "node": "18.20.8"
   }
 }
